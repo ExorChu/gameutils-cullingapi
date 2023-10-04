@@ -15,5 +15,16 @@
     "url": "https://github.com/ExorChu"
   },
   "keywords": [],
-  "samples": []
+  "samples": [
+    {
+      "displayName": "Demo Culling",
+      "description": "Demo Culling with Mono Behaviour",
+      "path": "Samples/culling-api"
+    },
+    {
+      "displayName": "Demo Culling ( Simple )",
+      "description": "Demo Culling with plain script",
+      "path": "Samples/culling-api-simple"
+    }
+  ]
 }
