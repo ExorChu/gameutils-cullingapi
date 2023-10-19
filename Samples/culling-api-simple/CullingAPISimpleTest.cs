@@ -29,8 +29,9 @@ namespace GameUtils.CullingAPI
             public float radius;
 
             public Vector3 targetPosition;
-            
-            public int visibility;
+
+            public bool isVisible;
+            public int lod;
         }
 
         private void Start()
@@ -59,6 +60,7 @@ namespace GameUtils.CullingAPI
 
         private void Update()
         {
+            simpleAPI.SetReferencePoint(Camera.main.transform.position);
             for (int i = 0; i < testElementCount; i++)
             {
                 ref var cube = ref cubeDatas[i];
@@ -88,34 +90,65 @@ namespace GameUtils.CullingAPI
         }
 
         private MaterialPropertyBlock mpb;
+        int[] cacheArray = new int[1024]; // get max 100 element at a time. 
 
         private void LateUpdate()
         {
-            Span<CullingElement> span = simpleAPI.GetElements();
-            for (int i = 0; i < span.Length; i++)
+            //old method, which need to travel through all elements
+            //Span<CullingElement> span = simpleAPI.GetElements();
+            //for (int i = 0; i < span.Length; i++)
+            //{
+            //    ref var ce = ref span[i];
+            //    if (ce.HasAnyChanged)
+            //    {
+            //        ce.ClearFlags();
+
+            //        int id = ce.id;
+
+            //        int indexOf = Array.FindIndex(cubeDatas, (e) => e.id == id);
+
+            //        if(indexOf >= 0)
+            //        {
+            //            ref var cube = ref cubeDatas[indexOf];
+            //            cube.visibility = ce.LOD;
+            //        }
+            //    }
+            //}
+
+            if (simpleAPI.HasAnyElementChanged())
             {
-                ref var ce = ref span[i];
-                if (ce.HasAnyChanged)
+                Span<int> changedElement = new Span<int>(cacheArray);
+
+                int count = simpleAPI.GetChangedElements(changedElement);
+
+                for (int i = 0; i < count; i++)
                 {
-                    ce.ClearFlags();
-
-                    int id = ce.id;
-
-                    int indexOf = Array.FindIndex(cubeDatas, (e) => e.id == id);
-
-                    if(indexOf >= 0)
+                    var index = changedElement[i];
+                    ref var ce = ref simpleAPI.GetElementRef(index);
+                    if(ce.HasAnyChanged) // no need to check
                     {
-                        ref var cube = ref cubeDatas[indexOf];
-                        cube.visibility = ce.LOD;
+                        ce.ClearFlags();
+
+                        int id = ce.id;
+                        int indexOf = Array.FindIndex(cubeDatas, (e) => e.id == id);
+                        if(indexOf >= 0)
+                        {
+                            ref var cube = ref cubeDatas[indexOf];
+                            cube.lod = ce.LOD;
+                            cube.isVisible = ce.IsVisible;
+                            // check visibilty as well as lod here too.
+                        }
                     }
                 }
             }
+
+
 
             mpb = mpb ?? new MaterialPropertyBlock();
 
             for (int i = 0; i < testElementCount; i++)
             {
-                ref var cube = ref cubeDatas[i];
+                ref var cube = ref cubeDatas[i];              
                 
                 Matrix4x4 mtx = Matrix4x4.TRS(cube.position, Quaternion.identity, Vector3.one);
 
@@ -124,22 +157,23 @@ namespace GameUtils.CullingAPI
 
                 //var mpb = new MaterialPropertyBlock();          
 
-                mpb.SetColor("_Color", GetColorFromLOD(cube.visibility));
+                mpb.SetColor("_Color", GetColorFromLOD(cube.lod, cube.isVisible));
                 renderParams.matProps = mpb;
 
                 Graphics.RenderMesh(in renderParams, meshToDraw, 0, mtx);
             }
         }
 
-        private Color GetColorFromLOD(int lod)
+        private Color GetColorFromLOD(int lod, bool isVisible = true)
         {
+            Color mul = isVisible ? Color.white : Color.gray;
             switch (lod)
             {
-                case 0: return Color.green;
-                case 1: return Color.yellow;
-                case 2: return Color.red;
+                case 0: return Color.green * mul;
+                case 1: return Color.yellow * mul;
+                case 2: return Color.red * mul;
             }
-            return Color.white;
+            return Color.gray;
         }
 
         private void OnDestroy()

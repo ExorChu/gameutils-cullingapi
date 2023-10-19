@@ -1,8 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using UnityEngine;
-using static UnityEditor.PlayerSettings;
 
 namespace GameUtils.CullingAPI.Simple
 {    
@@ -12,12 +12,14 @@ namespace GameUtils.CullingAPI.Simple
         internal const int LOD_CHANGED = 1 << 1;
 
         public int id;
-        internal int visiblity;
+        internal bool isVisible;
+        internal int distanceBand;
         internal int flags;
-        internal int queryVisibility;
+        internal bool queryVisible;
+        internal int queryDistanceBand;
 
-        public bool IsVisible => visiblity > -1;
-        public int LOD => visiblity;
+        public bool IsVisible => isVisible;
+        public int LOD => distanceBand;
 
         public bool HasVisibleChanged
         {
@@ -42,7 +44,7 @@ namespace GameUtils.CullingAPI.Simple
                     flags &= ~LOD_CHANGED;
             }
         }
-
+       
         public bool HasAnyChanged => (flags & (VISIBLE_CHANGED | LOD_CHANGED)) > 0;
 
         public void ClearFlags()
@@ -67,6 +69,7 @@ namespace GameUtils.CullingAPI.Simple
 
         private Queue<int> leftoverIds;
         private int bandCount;
+        private int elementChangeCount;
 
         public CullingAPISimple(int maxElementCount)
         {
@@ -138,7 +141,7 @@ namespace GameUtils.CullingAPI.Simple
         }
         private bool TryGetIndex(int id, out int index)
         {
-            index = Array.BinarySearch(ids, 0, count, id);
+            index = Array.IndexOf(ids, id, 0, count);
             return index >= 0;
         }
 
@@ -162,41 +165,83 @@ namespace GameUtils.CullingAPI.Simple
             return new Span<CullingElement>(elements, 0, count);
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool HasAnyElementChanged() => elementChangeCount > 0;
+
+        public int GetChangedElements(int[] indices) => GetChangedElements(new Span<int>(indices));
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ref CullingElement GetElementRef(int index) => ref elements[index];
+
+        public int GetChangedElements(Span<int> indices)
+        {
+            int len = indices.Length;
+            int min = elementChangeCount > len ? len : elementChangeCount;
+
+            int totalElement = 0;
+            for (int i = 0; i < count; i++)
+            {
+                if (totalElement >= min)
+                    break;
+                ref var ele = ref elements[i];
+                if (ele.HasAnyChanged)
+                {
+                    indices[totalElement++] = ele.id;
+                }
+            }
+            return totalElement;
+        }
+
         public void Update()
         {
             for (int i = 0; i < count; i++)
             {
                 ref var ele = ref elements[i];
-                ele.queryVisibility = -1;
+                ele.queryDistanceBand = -1;
+                ele.queryVisible = false;
             }
 
             int qCount;
 
+            qCount = cullingGroup.QueryIndices(true, queryArray, 0);
+
+            for (int i = 0; i < qCount; i++)
+            {
+                ref var ele = ref elements[queryArray[i]];
+                ele.queryVisible = true;
+            }
+
             for (int i = 0; i < bandCount; i++)
             {
                 int band = i;
-                qCount = cullingGroup.QueryIndices(true, band, queryArray, 0);
+                qCount = cullingGroup.QueryIndices(band, queryArray, 0);
                 for (int j = 0; j < qCount; j++)
                 {
                     ref var ele = ref elements[queryArray[j]];
-                    ele.queryVisibility = band;
+                    ele.queryDistanceBand = band;         
                 }
             }
 
+            elementChangeCount = 0;
             for (int i = 0; i < count; i++)
             {
                 ref var ele = ref elements[i];
-                if(ele.queryVisibility != ele.visiblity)
+
+                if (ele.queryVisible ^ ele.isVisible)
                 {
-                    if(ele.queryVisibility == -1 || ele.visiblity == -1)
-                    {
-                        ele.HasVisibleChanged = true;
-                    }
-                    else
-                    {
-                        ele.HasLODChanged = true;
-                    }
-                    ele.visiblity = ele.queryVisibility;
+                    ele.isVisible = ele.queryVisible;
+                    ele.HasVisibleChanged = true;
+                }
+
+                if(ele.queryDistanceBand != ele.distanceBand)
+                {
+                    ele.HasLODChanged = true;
+                    ele.distanceBand = ele.queryDistanceBand;
+                }
+
+                if (ele.HasAnyChanged)
+                {
+                    elementChangeCount++;
                 }
             }
         }
